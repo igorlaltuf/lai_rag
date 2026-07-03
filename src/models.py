@@ -24,9 +24,21 @@ class IdeiaPedido(BaseModel):
     fontes: list[str] = Field(default_factory=list)
 
 
+class AnalisePedido(BaseModel):
+    protocolo: str = ""
+    orgao: str = ""
+    data: str = ""
+    resumo_pedido: str = ""
+    resumo_resposta: str = ""
+    recurso: str = ""
+    lacunas: list[str] = Field(default_factory=list)
+    ideia_novo_pedido: str = ""
+
+
 class RAGAnswer(BaseModel):
     resumo_tema: str
     pedidos_encontrados: list[PedidoEncontrado] = Field(default_factory=list)
+    analise_por_pedido: list[AnalisePedido] = Field(default_factory=list)
     respostas_observadas: list[str] = Field(default_factory=list)
     lacunas: list[str] = Field(default_factory=list)
     ideias_novos_pedidos: list[IdeiaPedido] = Field(default_factory=list)

@@ -21,11 +21,58 @@ class Chunk:
     metadata: dict[str, str]
 
 
+CONTENT_COLUMNS = ["pedido", "resposta", "recurso", "decisao_recurso"]
+
+
+def _trim_text(value: object, max_chars: int | None = None) -> str:
+    text = str(value or "").strip()
+    if max_chars is not None and len(text) > max_chars:
+        return text[:max_chars].rstrip() + "..."
+    return text
+
+
+def build_content_text(row, field_limits: dict[str, int] | None = None) -> str:
+    parts = [
+        ("pedido", "Pedido", row.get("pedido", "")),
+        ("resposta", "Resposta", row.get("resposta", "")),
+        ("recurso", "Recurso", row.get("recurso", "")),
+        ("decisao_recurso", "Decisao do recurso", row.get("decisao_recurso", "")),
+    ]
+    blocks = []
+    for field, label, value in parts:
+        text = _trim_text(value, field_limits.get(field) if field_limits else None)
+        if text:
+            blocks.append(f"{label}: {text}")
+    return "\n".join(blocks).strip()
+
+
+def build_context_text(row) -> str:
+    return build_content_text(
+        row,
+        field_limits={
+            "pedido": 1200,
+            "resposta": 1200,
+            "recurso": 900,
+            "decisao_recurso": 900,
+        },
+    )
+
+
 def load_documents() -> pd.DataFrame:
     if not DB_PATH.exists():
         raise FileNotFoundError("Banco processado nao encontrado. Rode: uv run python -m src.prepare")
     with sqlite3.connect(DB_PATH) as conn:
         return pd.read_sql_query("SELECT rowid AS doc_id, * FROM documents", conn)
+
+
+def filter_indexable_documents(df: pd.DataFrame) -> pd.DataFrame:
+    if not all(column in df.columns for column in CONTENT_COLUMNS):
+        return df.iloc[0:0].copy()
+    content = df[CONTENT_COLUMNS].fillna("").astype(str)
+    has_pedido_resposta = content["pedido"].str.strip().ne("") & content["resposta"].str.strip().ne("")
+    has_recurso_decisao = content["recurso"].str.strip().ne("") & content["decisao_recurso"].str.strip().ne("")
+    has_content = has_pedido_resposta | has_recurso_decisao
+    return df[has_content].copy()
 
 
 def split_by_tokens(text: str, max_tokens: int = 700, overlap: int = 100) -> list[str]:
@@ -51,13 +98,9 @@ def split_by_tokens(text: str, max_tokens: int = 700, overlap: int = 100) -> lis
 def make_chunks(df: pd.DataFrame) -> list[Chunk]:
     chunks: list[Chunk] = []
     for _, row in df.iterrows():
-        prefix = (
-            f"Protocolo: {row.get('protocolo', '')}\n"
-            f"Orgao: {row.get('orgao', '')}\n"
-            f"Data: {row.get('data_pedido', '')}\n"
-            f"Status: {row.get('status', '')}\n"
-        )
-        text = f"{prefix}{row.get('document_text', '')}".strip()
+        text = build_content_text(row)
+        if not text:
+            continue
         for idx, chunk_text in enumerate(split_by_tokens(text)):
             chunks.append(
                 Chunk(
@@ -107,6 +150,14 @@ def run(reset: bool = True, batch_size: int = 128, limit: int | None = None) -> 
     df = load_documents()
     if limit is not None:
         df = df.head(limit)
+    total_docs = len(df)
+    df = filter_indexable_documents(df)
+    skipped_docs = total_docs - len(df)
+    if skipped_docs:
+        print(
+            f"Ignorando {skipped_docs} documentos sem par pedido+resposta ou recurso+decisao de recurso.",
+            flush=True,
+        )
     chunks = make_chunks(df)
     collection = get_collection(reset=reset)
     texts = [chunk.text for chunk in chunks]

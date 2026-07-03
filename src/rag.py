@@ -7,9 +7,9 @@ from pydantic import ValidationError
 
 from src.config import load_settings
 from src.costs import count_tokens, estimate_cost, format_usd
-from src.models import IdeiaPedido, PedidoEncontrado, RAGAnswer, SourceRef
+from src.models import AnalisePedido, IdeiaPedido, PedidoEncontrado, RAGAnswer, SourceRef
 from src.openai_client import get_client
-from src.retrieval import SearchResult, hybrid_search, lexical_search
+from src.retrieval import SearchResult, enrich_with_related_resources, hybrid_search, lexical_search
 from src.safety import sanitize_user_query
 
 
@@ -37,12 +37,21 @@ Exemplo de ideia boa:
 def build_context(results: list[SearchResult]) -> str:
     blocks = []
     for idx, result in enumerate(results, start=1):
+        has_pedido = "Pedido:" in result.text
+        has_resposta = "Resposta:" in result.text
+        has_recurso = "Recurso:" in result.text
+        has_decisao_recurso = "Decisao do recurso:" in result.text
         blocks.append(
             f"[Fonte {idx}]\n"
+            f"Tipo da fonte: {result.source}\n"
             f"Protocolo: {result.protocolo}\n"
             f"Orgao: {result.orgao}\n"
             f"Data: {result.data_pedido}\n"
             f"Status: {result.status}\n"
+            f"Campos presentes: pedido={'sim' if has_pedido else 'nao'}; "
+            f"resposta={'sim' if has_resposta else 'nao'}; "
+            f"recurso={'sim' if has_recurso else 'nao'}; "
+            f"decisao_recurso={'sim' if has_decisao_recurso else 'nao'}\n"
             f"Trecho: {result.text[:3000]}"
         )
     return "\n\n".join(blocks)
@@ -54,6 +63,17 @@ Retorne JSON com exatamente estes campos:
 {
   "resumo_tema": "string",
   "pedidos_encontrados": [{"protocolo": "string", "orgao": "string", "resumo": "string", "status_resposta": "string"}],
+  "analise_por_pedido": [
+    {
+      "protocolo": "string",
+      "orgao": "string",
+      "data": "string",
+      "resumo_pedido": "string",
+      "resumo_resposta": "string",
+      "recurso": "string",
+      "lacunas": ["string"]
+    }
+  ],
   "respostas_observadas": ["string"],
   "lacunas": ["string"],
   "ideias_novos_pedidos": [{"titulo": "string", "texto_sugerido": "string", "justificativa": "string", "fontes": ["protocolo"]}],
@@ -95,6 +115,22 @@ def fallback_answer(topic: str, results: list[SearchResult], reason: str) -> RAG
         )
         for result in results[:5]
     ]
+    analises = [
+        AnalisePedido(
+            protocolo=result.protocolo,
+            orgao=result.orgao,
+            data=result.data_pedido,
+            resumo_pedido=result.text[:450],
+            resumo_resposta="Consulte o trecho recuperado; a API da OpenAI nao foi usada para resumir a resposta.",
+            recurso="Nao identificado no fallback local.",
+            lacunas=["Analise estruturada completa depende da chamada ao modelo gerador."],
+            ideia_novo_pedido=(
+                f"Solicito documentos, respostas anteriores, recursos e dados agregados relacionados a {topic}, "
+                "com protocolo, unidade responsavel, fundamento da resposta e eventuais negativas."
+            ),
+        )
+        for result in results[:5]
+    ]
     idea = IdeiaPedido(
         titulo=f"Pedido detalhado sobre {topic}",
         texto_sugerido=(
@@ -108,6 +144,7 @@ def fallback_answer(topic: str, results: list[SearchResult], reason: str) -> RAG
     return RAGAnswer(
         resumo_tema=f"Tema consultado: {topic}",
         pedidos_encontrados=pedidos,
+        analise_por_pedido=analises,
         respostas_observadas=["Consulte os trechos recuperados; a API da OpenAI nao foi usada nesta execucao."],
         lacunas=["Configure OPENAI_API_KEY para gerar analise estruturada completa."],
         ideias_novos_pedidos=[idea],
@@ -146,6 +183,7 @@ def answer_topic(topic: str, top_k: int | None = None, vector_weight: float | No
         limit=top_k or settings.rag_top_k,
         vector_weight=settings.rag_vector_weight if vector_weight is None else vector_weight,
     )
+    results = enrich_with_related_resources(results)
     if not results:
         return fallback_answer(topic, [], "Nenhum documento recuperado. Rode download, prepare e index."), []
 
@@ -166,6 +204,14 @@ Tarefa:
 3. Aponte lacunas para novos pedidos.
 4. Gere de 3 a 5 ideias de novos pedidos de LAI.
 5. Se o diagnostico indicar ausencia de keyword direta, declare essa limitacao em alertas_limitacoes e sugira temas parecidos com base nas fontes recuperadas.
+6. Quando houver fonte do tipo related_resource com o mesmo protocolo de um pedido encontrado, use todas essas fontes para resumir as instancias de recurso.
+7. Ao falar de recurso, considere tanto o texto do recurso quanto a resposta/decisao do recurso, em todas as instancias existentes para aquele protocolo.
+8. Preencha analise_por_pedido agrupando cada pedido encontrado com: orgao, data, protocolo, resumo do pedido em uma frase, resumo da resposta, informacao sobre recurso e lacunas. Nao coloque sugestao de novo pedido dentro de analise_por_pedido.
+9. Em analise_por_pedido.resumo_pedido, escreva apenas uma frase curta sobre o que foi pedido, sem introducao geral e sem listas extensas.
+10. Em pedidos_encontrados, produza resumos curtos para uma lista inicial. Cada item deve ser independente para a interface exibir com quebras de linha.
+11. Se uma fonte indicar "Campos presentes: resposta=sim", nao diga que nao ha resposta no contexto; resuma o conteudo apos o marcador "Resposta:".
+12. Se uma fonte indicar "Campos presentes: decisao_recurso=sim", nao diga que nao ha decisao de recurso no contexto; resuma o conteudo apos o marcador "Decisao do recurso:".
+13. Gere as sugestoes de novos pedidos apenas no campo ideias_novos_pedidos, baseadas nos pedidos encontrados e nas lacunas observadas.
 
 {output_schema_hint()}
 """.strip()
