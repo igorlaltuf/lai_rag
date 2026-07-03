@@ -20,9 +20,11 @@ htmlcov/
 data/raw/*
 data/processed/*
 data/vector/*
+data/attachments/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/vector/.gitkeep
+!data/attachments/.gitkeep
 
 *.log
 *.tmp

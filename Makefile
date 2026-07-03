@@ -47,5 +47,5 @@ notebook:
 	$(UV) run python -m ipykernel install --user --name llm-law-rag
 
 clean-data:
-	rm -rf data/raw/* data/processed/* data/vector/*
-	touch data/raw/.gitkeep data/processed/.gitkeep data/vector/.gitkeep
+	rm -rf data/raw/* data/processed/* data/vector/* data/attachments/*
+	touch data/raw/.gitkeep data/processed/.gitkeep data/vector/.gitkeep data/attachments/.gitkeep

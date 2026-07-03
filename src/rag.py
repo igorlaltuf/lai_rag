@@ -5,6 +5,7 @@ import json
 from openai import OpenAI
 from pydantic import ValidationError
 
+from src.attachments import build_attachment_context, load_attachment_excerpts
 from src.config import load_settings
 from src.costs import count_tokens, estimate_cost, format_usd
 from src.models import AnalisePedido, IdeiaPedido, PedidoEncontrado, RAGAnswer, SourceRef
@@ -187,7 +188,10 @@ def answer_topic(topic: str, top_k: int | None = None, vector_weight: float | No
     if not results:
         return fallback_answer(topic, [], "Nenhum documento recuperado. Rode download, prepare e index."), []
 
+    protocols = [result.protocolo for result in results if result.protocolo]
+    attachment_excerpts = load_attachment_excerpts(protocols)
     context = build_context(results)
+    attachment_context = build_attachment_context(attachment_excerpts)
     prompt = f"""
 Tema informado pelo usuario: {topic}
 Observacao de sanitizacao: {"A consulta foi sanitizada antes do uso." if topic != original_topic else "A consulta nao exigiu sanitizacao."}
@@ -195,6 +199,9 @@ Diagnostico de keyword: {keyword_note}
 
 Contexto recuperado:
 {context}
+
+Anexos PDF de respostas recuperados sob demanda:
+{attachment_context or "Nenhum anexo PDF de resposta foi recuperado para os protocolos encontrados."}
 
 {FEW_SHOT}
 
@@ -212,6 +219,8 @@ Tarefa:
 11. Se uma fonte indicar "Campos presentes: resposta=sim", nao diga que nao ha resposta no contexto; resuma o conteudo apos o marcador "Resposta:".
 12. Se uma fonte indicar "Campos presentes: decisao_recurso=sim", nao diga que nao ha decisao de recurso no contexto; resuma o conteudo apos o marcador "Decisao do recurso:".
 13. Gere as sugestoes de novos pedidos apenas no campo ideias_novos_pedidos, baseadas nos pedidos encontrados e nas lacunas observadas.
+14. Use os blocos "Anexos PDF de respostas" como evidencia complementar sobre o que o orgao respondeu, especialmente quando a resposta textual mencionar documentos anexos.
+15. Se um anexo tiver erro ou estiver sem texto extraivel, mencione essa limitacao apenas se ela afetar a analise.
 
 {output_schema_hint()}
 """.strip()

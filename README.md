@@ -37,7 +37,7 @@ make run
 make app
 ```
 
-`make run` baixa os ZIPs publicos da CGU, cria o SQLite local e gera o indice vetorial completo. A geracao de embeddings usa a API da OpenAI.
+`make run` baixa os ZIPs publicos da CGU, cria o SQLite local e gera o indice vetorial completo. A geracao de embeddings usa a API da OpenAI. Anexos PDF de respostas sao baixados sob demanda durante as consultas e ficam em cache local.
 
 Comandos equivalentes por etapa:
 
@@ -61,11 +61,18 @@ Modelos configuraveis no `.env`:
 ## Como funciona
 
 1. `download`: tenta descobrir arquivos CSV/XML/XLS/ZIP de 2026 na pagina oficial de dados abertos da LAI.
-2. `prepare`: normaliza colunas comuns, cria `data/processed/lai_2026.sqlite` e uma tabela FTS5.
+2. `prepare`: normaliza colunas comuns, cria `data/processed/lai_2026.sqlite`, uma tabela FTS5 e uma tabela `attachments` com PDFs de resposta/recurso.
 3. `index`: divide documentos em chunks, gera embeddings OpenAI e persiste no ChromaDB.
 4. `retrieval`: combina busca semantica e keyword com Reciprocal Rank Fusion.
-5. `rag`: monta prompt com contexto recuperado e valida a resposta em JSON com Pydantic.
+5. `rag`: monta prompt com contexto recuperado, inclui trechos de anexos PDF quando disponiveis e valida a resposta em JSON com Pydantic.
 6. `app`: mostra chatbot, fontes e tabela de documentos recuperados.
+
+Arquivos locais ignorados pelo Git:
+
+- `data/raw/`: ZIPs baixados da CGU.
+- `data/processed/`: SQLite processado.
+- `data/vector/`: indice ChromaDB.
+- `data/attachments/`: cache de PDFs, textos extraidos e falhas de download/leitura.
 
 
 ## Testes

@@ -12,6 +12,7 @@ DATA_DIR = ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 VECTOR_DIR = DATA_DIR / "vector" / "chroma"
+ATTACHMENTS_DIR = DATA_DIR / "attachments"
 DB_PATH = PROCESSED_DIR / "lai_2026.sqlite"
 
 
@@ -47,5 +48,5 @@ def load_settings() -> Settings:
 
 
 def ensure_dirs() -> None:
-    for path in [RAW_DIR, PROCESSED_DIR, VECTOR_DIR]:
+    for path in [RAW_DIR, PROCESSED_DIR, VECTOR_DIR, ATTACHMENTS_DIR]:
         path.mkdir(parents=True, exist_ok=True)

@@ -6,6 +6,7 @@ import chromadb
 import pandas as pd
 import streamlit as st
 
+from src.attachments import AttachmentExcerpt, load_attachment_excerpts
 from src.config import DB_PATH, VECTOR_DIR, load_settings
 from src.costs import MODEL_PRICES_USD_PER_1M
 from src.rag import answer_topic
@@ -123,11 +124,18 @@ def resources_by_protocol(results) -> dict[str, list[dict[str, str]]]:
     return resources
 
 
+def attachment_excerpts_by_protocol(excerpts: list[AttachmentExcerpt]) -> dict[str, list[AttachmentExcerpt]]:
+    grouped: dict[str, list[AttachmentExcerpt]] = {}
+    for excerpt in excerpts:
+        grouped.setdefault(excerpt.attachment.protocolo, []).append(excerpt)
+    return grouped
+
+
 settings = load_settings()
 base_stats = count_base_stats()
 documents_count = base_stats["documents"]
 
-st.title("Assistente de pedidos de LAI 2026")
+st.title("Explorador de pedidos de informação ao governo brasileiro")
 st.caption("Busca híbrida em pedidos, respostas e recursos da LAI, com sugestões geradas por LLM.")
 
 with st.sidebar:
@@ -137,9 +145,6 @@ with st.sidebar:
     model_options = [model for model in MODEL_PRICES_USD_PER_1M if model.startswith("gpt")]
     default_idx = model_options.index(settings.generation_model) if settings.generation_model in model_options else 0
     generation_model = st.selectbox("Modelo OpenAI", model_options, index=default_idx)
-    st.metric("Documentos processados", f"{base_stats['documents']:,}".replace(",", "."))
-    st.metric("Documentos indexáveis", f"{base_stats['indexable_documents']:,}".replace(",", "."))
-    st.metric("Chunks vetoriais", f"{base_stats['chunks']:,}".replace(",", "."))
 
 if documents_count == 0:
     st.warning(
@@ -168,6 +173,8 @@ if topic:
             answer, results = answer_topic(topic, top_k=top_k, vector_weight=vector_weight, model=generation_model)
             original_requests = original_request_by_protocol(results)
             resources = resources_by_protocol(results)
+            attachment_excerpts = load_attachment_excerpts([result.protocolo for result in results if result.protocolo])
+            attachments = attachment_excerpts_by_protocol(attachment_excerpts)
             if answer.pedidos_encontrados and not answer.analise_por_pedido:
                 st.markdown("**Pedidos encontrados**")
                 for item in answer.pedidos_encontrados:
@@ -210,6 +217,21 @@ if topic:
                         elif has_meaningful_resource(item.recurso):
                             st.markdown("**Recursos**")
                             st.write(item.recurso)
+                        protocol_attachments = attachments.get(item.protocolo, [])
+                        if protocol_attachments:
+                            st.markdown("**Anexos analisados**")
+                            for attachment_idx, excerpt in enumerate(protocol_attachments, start=1):
+                                attachment = excerpt.attachment
+                                label = f"{attachment_idx}. {attachment.nome_arquivo or 'PDF sem nome'}"
+                                st.markdown(f"**{label}**")
+                                details = [
+                                    attachment.tipo_anexo,
+                                    attachment.instancia,
+                                    f"status: {excerpt.status}",
+                                ]
+                                st.caption(" | ".join(part for part in details if part))
+                                if excerpt.error:
+                                    st.warning(excerpt.error)
                         st.markdown("**Lacunas**")
                         if item.lacunas:
                             for lacuna in item.lacunas:
